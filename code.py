@@ -5,6 +5,7 @@
 %config InlineBackend.figure_format = 'retina'
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 from torch import nn
@@ -45,7 +46,9 @@ valid_transforms = transforms.Compose([transforms.Resize(255),
 
 test_transforms = transforms.Compose([transforms.Resize(255),
                                       transforms.CenterCrop(224),
-                                      transforms.ToTensor()])
+                                      transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406], 
+                                                            [0.229, 0.224, 0.225])])
 
 # TODO: Load the datasets with ImageFolder
 train_data = datasets.ImageFolder(data_dir + '/train', transform=train_transforms)
@@ -56,15 +59,6 @@ test_data = datasets.ImageFolder(data_dir + '/test', transform=test_transforms)
 trainloader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
 validloader = torch.utils.data.DataLoader(valid_data, batch_size=32)
 testloader = torch.utils.data.DataLoader(test_data, batch_size=32)
-
-##########################################################################################################
-data_iter = iter(testloader)
-
-images, labels = next(data_iter)
-fig, axes = plt.subplots(figsize=(10,4), ncols=4)
-for ii in range(4):
-    ax = axes[ii]
-    helper.imshow(images[ii], ax=ax, normalize=False)
 
 ###BLOCK 4###
 
@@ -160,8 +154,8 @@ print('Time taken to run: {}'.format(time() - start))
 class Classifier(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(150528, 12580)
-        self.fc2 = nn.Linear(12580,102)
+        self.fc1 = nn.Linear(150528, 1024)
+        self.fc2 = nn.Linear(1024,102)
         
     def forward(self, x):
         # make sure input tensor is flattened
@@ -182,10 +176,10 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 start = time()
 with active_session():
-    epochs = 5
-    train_loss_list = []
-    valid_loss_list = []
-    valid_accuracy_list = []
+    epochs = 30
+    model_train_loss_list = []
+    model_valid_loss_list = []
+    model_valid_accuracy_list = []
 
     for epoch in range(epochs):
         running_loss = valid_loss = 0
@@ -222,7 +216,7 @@ with active_session():
                     equals = top_class == labels.view(*top_class.shape)
                     valid_accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
                     
-            model.train()
+#             model.train()
                     
             print(f"Epoch {epoch+1}/{epochs}.. "
                   f"Train loss: {running_loss:.3f}.. "
