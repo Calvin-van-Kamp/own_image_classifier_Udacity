@@ -39,7 +39,9 @@ train_transforms = transforms.Compose([transforms.RandomRotation(30),
 
 valid_transforms = transforms.Compose([transforms.Resize(255),
                                        transforms.CenterCrop(224),
-                                       transforms.ToTensor()])
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406], 
+                                                            [0.229, 0.224, 0.225])])
 
 test_transforms = transforms.Compose([transforms.Resize(255),
                                       transforms.CenterCrop(224),
@@ -51,7 +53,7 @@ valid_data = datasets.ImageFolder(data_dir + '/valid', transform=valid_transform
 test_data = datasets.ImageFolder(data_dir + '/test', transform=test_transforms)
 
 # TODO: Using the image datasets and the trainforms, define the dataloaders
-trainloader = torch.utils.data.DataLoader(train_data, batch_size=128, shuffle=True)
+trainloader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
 validloader = torch.utils.data.DataLoader(valid_data, batch_size=32)
 testloader = torch.utils.data.DataLoader(test_data, batch_size=32)
 
@@ -151,4 +153,85 @@ with active_session():
             valid_accuracy_list.append(valid_accuracy/len(validloader))
             running_loss = 0
             
+print('Time taken to run: {}'.format(time() - start))
+
+###BLOCK 7###
+
+class Classifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(150528, 12580)
+        self.fc2 = nn.Linear(12580,102)
+        
+    def forward(self, x):
+        # make sure input tensor is flattened
+        x = x.view(x.shape[0], -1)
+        
+        x = F.relu(self.fc1(x))
+        x = F.log_softmax(self.fc2(x), dim=1)
+        
+        return x
+      
+###BLOCK 8###
+
+#Train our own model
+model = Classifier()
+model.to(device)
+criterion = nn.NLLLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+start = time()
+with active_session():
+    epochs = 5
+    train_loss_list = []
+    valid_loss_list = []
+    valid_accuracy_list = []
+
+    for epoch in range(epochs):
+        running_loss = valid_loss = 0
+        for inputs, labels in trainloader:
+            #Move input and label tensors to the selected device
+            inputs, labels = inputs.to(device), labels.to(device)
+            #Prevent gradients from being stored
+            optimizer.zero_grad()
+
+            log_ps = model(inputs)
+            loss = criterion(log_ps, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+        else:
+            valid_loss = 0
+            valid_accuracy = 0
+            
+            with torch.no_grad():
+                model.eval()
+                for inputs, labels in validloader:
+                    #Move input and label tensors to the selected device
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    logps = model.forward(inputs)
+                    valid_batch_loss = criterion(logps, labels)
+
+                    valid_loss += valid_batch_loss.item()
+
+                    # Calculate validation accuracy
+                    ps = torch.exp(logps)
+                    top_p, top_class = ps.topk(1, dim=1)
+                    equals = top_class == labels.view(*top_class.shape)
+                    valid_accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
+                    
+            model.train()
+                    
+            print(f"Epoch {epoch+1}/{epochs}.. "
+                  f"Train loss: {running_loss:.3f}.. "
+                  f"Validation loss: {valid_loss/len(validloader):.3f}.. "
+                  f"Validation accuracy: {valid_accuracy/len(validloader):.3f}")
+
+            model_train_loss_list.append(running_loss)
+            model_valid_loss_list.append(valid_loss/len(validloader))
+            model_valid_accuracy_list.append(valid_accuracy/len(validloader))
+            running_loss = 0
+        
 print('Time taken to run: {}'.format(time() - start))
