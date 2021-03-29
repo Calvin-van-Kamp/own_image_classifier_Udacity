@@ -151,81 +151,111 @@ print('Time taken to run: {}'.format(time() - start))
 
 ###BLOCK 7###
 
-class Classifier(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(150528, 1024)
-        self.fc2 = nn.Linear(1024,102)
-        
-    def forward(self, x):
-        # make sure input tensor is flattened
-        x = x.view(x.shape[0], -1)
-        
-        x = F.relu(self.fc1(x))
-        x = F.log_softmax(self.fc2(x), dim=1)
-        
-        return x
-      
+def testing(model):
+    test_losses = []
+    test_loss = 0
+    accuracy = 0
+    # Turn off gradients for validation, saves memory and computations
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            logps = model.forward(inputs)
+            batch_loss = criterion(logps, labels)
+
+            test_loss += batch_loss.item()
+
+            # Calculate test accuracy
+            ps = torch.exp(logps)
+            top_p, top_class = ps.topk(1, dim=1)
+            equals = top_class == labels.view(*top_class.shape)
+            accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
+            test_losses.append(accuracy/len(testloader))
+
+    print(f"Test accuracy of : {accuracy/len(testloader):.3f}")
+    
+    
 ###BLOCK 8###
 
-#Train our own model
-model = Classifier()
-model.to(device)
-criterion = nn.NLLLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# TODO: Save the checkpoint
+vgg.class_to_idx = train_data.class_to_idx
+vgg.checkpoint = {'input_size': 25088,
+                  'output_size': 102,
+                  'epochs': 5,
+                  'arch': 'vgg16',
+                  'optimizer': optimizer.state_dict,
+                  'classifier': vgg.classifier,
+                  'class_to_idx': vgg.class_to_idx,
+                  'optimizer_dict': optimizer.state_dict(),
+                  'state_dict': vgg.state_dict()}
 
-start = time()
-with active_session():
-    epochs = 30
-    model_train_loss_list = []
-    model_valid_loss_list = []
-    model_valid_accuracy_list = []
+torch.save(vgg.checkpoint, 'vgg_checkpoint.pth')
 
-    for epoch in range(epochs):
-        running_loss = valid_loss = 0
-        for inputs, labels in trainloader:
-            #Move input and label tensors to the selected device
-            inputs, labels = inputs.to(device), labels.to(device)
-            #Prevent gradients from being stored
-            optimizer.zero_grad()
+###BLOCK 9###
 
-            log_ps = model(inputs)
-            loss = criterion(log_ps, labels)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        else:
-            valid_loss = 0
-            valid_accuracy = 0
-            
-            with torch.no_grad():
-                model.eval()
-                for inputs, labels in validloader:
-                    #Move input and label tensors to the selected device
-                    inputs, labels = inputs.to(device), labels.to(device)
-                    logps = model.forward(inputs)
-                    valid_batch_loss = criterion(logps, labels)
-
-                    valid_loss += valid_batch_loss.item()
-
-                    # Calculate validation accuracy
-                    ps = torch.exp(logps)
-                    top_p, top_class = ps.topk(1, dim=1)
-                    equals = top_class == labels.view(*top_class.shape)
-                    valid_accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
-                    
-#             model.train()
-                    
-            print(f"Epoch {epoch+1}/{epochs}.. "
-                  f"Train loss: {running_loss:.3f}.. "
-                  f"Validation loss: {valid_loss/len(validloader):.3f}.. "
-                  f"Validation accuracy: {valid_accuracy/len(validloader):.3f}")
-
-            model_train_loss_list.append(running_loss)
-            model_valid_loss_list.append(valid_loss/len(validloader))
-            model_valid_accuracy_list.append(valid_accuracy/len(validloader))
-            running_loss = 0
+# could not get fc_model to load so I went with this more hands-on approach
+def load_checkpoint(filepath):
+    checkpoint = torch.load(filepath)
+    model = models.vgg16(pretrained=True)
+    model.arch = checkpoint['arch']
+    model.class_to_idx = checkpoint['class_to_idx']
+    model.classifier = checkpoint['classifier']
+    model.load_state_dict(checkpoint['state_dict'])
+#     optimizer.load_state_dict(checkpoint['optimizer_dict'])
+    
+    for param in model.parameters():
+        param.requires_grad = False
         
-print('Time taken to run: {}'.format(time() - start))
+    return model
+
+model = load_checkpoint('vgg_checkpoint.pth')
+model.to(device)
+
+###BLOCK 10###
+
+def process_image(image):
+    ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
+        returns an torch tensor.
+    '''
+    image = Image.open(image)
+    #resize image
+    image.thumbnail((255,255))
+    image_w, image_h = image.size
+    #crop image
+    left = (image_w - 224)/2
+    top = (image_h - 224)/2
+    right = (image_w + 224)/2
+    bottom = (image_h + 224)/2
+    image = image.crop((left, right, top, bottom))
+    #make an array
+    np_image = np.array(image)
+    #convert to floats
+    np_image = np_image/255.0
+    #normalize
+    norm_image = (np_image - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+    #transpose
+    output = norm_image.transpose((1, 2, 0))
+    
+    return torch.from_numpy(output)
+  
+###BLOCK 11###
+
+def imshow(image, ax=None, title=None):
+    """Imshow for Tensor."""
+    if ax is None:
+        fig, ax = plt.subplots()
+    
+    # PyTorch tensors assume the color channel is the first dimension
+    # but matplotlib assumes is the third dimension
+    image = image.numpy().transpose((1, 2, 0))
+    
+    # Undo preprocessing
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    image = std * image + mean
+    
+    # Image needs to be clipped between 0 and 1 or it looks like noise when displayed
+    image = np.clip(image, 0, 1)
+    
+    ax.imshow(image)
+    
+    return ax
