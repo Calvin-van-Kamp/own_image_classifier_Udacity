@@ -200,7 +200,6 @@ def load_checkpoint(filepath):
     model.class_to_idx = checkpoint['class_to_idx']
     model.classifier = checkpoint['classifier']
     model.load_state_dict(checkpoint['state_dict'])
-#     optimizer.load_state_dict(checkpoint['optimizer_dict'])
     
     for param in model.parameters():
         param.requires_grad = False
@@ -225,7 +224,7 @@ def process_image(image):
     top = (image_h - 224)/2
     right = (image_w + 224)/2
     bottom = (image_h + 224)/2
-    image = image.crop((left, right, top, bottom))
+    image = image.crop((left, top, right, bottom))
     #make an array
     np_image = np.array(image)
     #convert to floats
@@ -233,7 +232,7 @@ def process_image(image):
     #normalize
     norm_image = (np_image - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
     #transpose
-    output = norm_image.transpose((1, 2, 0))
+    output = norm_image.transpose((2, 0, 1))
     
     return torch.from_numpy(output)
   
@@ -259,3 +258,55 @@ def imshow(image, ax=None, title=None):
     ax.imshow(image)
     
     return ax
+
+###BLOCK 12###
+  
+def predict(image_path, model, topk=5):
+  ''' Predict the class (or classes) of an image using a trained deep learning model.
+      Dependent on process_images().
+  '''
+  #get image processed
+  input_image = process_image(image_path)
+  #make it a tensor so that it can be entered into the model
+  input_image = input_image.float()
+  input_image = torch.Tensor(input_image)
+  #GPU if available
+  input_image = input_image.to(device)
+  #final changes
+  input_image.unsqueeze_(0)
+  #get the probabilities
+  logps = model(input_image)
+  ps = np.exp(logps)
+  #get the top "topk" classes
+  top_p, top_class = ps.topk(topk, dim=1)
+  class_names = []
+  for x in classes:
+      class_names.append(cat_to_name['{}'.format(x)])
+        
+  return top_p[0].tolist(), top_class[0].add(1).tolist(), class_names
+  
+###BLOCK 13###
+
+#get a list of all flower names to subscript
+all_class_names = []
+for x in model.class_to_idx:
+    all_class_names.append(cat_to_name['{}'.format(x)])
+    
+#process the image and show it
+image_path = "flowers/test/1/image_06743.jpg"
+imshow(image)
+plt.axis('off')
+#get model results from image_path
+probs, classes, class_names = predict(image_path, model)
+#get position of class index from image_path to automate the title
+class_pos = re.findall('[0-9]+', image_path)[0]
+plt.title(all_class_names[int(class_pos)-1])
+
+###BLOCK 14###
+
+x_pos = [i for i, _ in enumerate(classes)]
+
+plt.barh(x_pos, probs, color= "red")
+
+plt.yticks(x_pos, class_names)
+plt.show()
